@@ -31,7 +31,7 @@ class ExecuteCommandInput(BaseModel):
     )
     working_dir: str | None = Field(
         default=None,
-        description="Working directory for command execution",
+        description="Working directory for command execution. If not provided, uses the stored working directory from set_working_directory.",
     )
     timeout: int = Field(
         default=30,
@@ -41,7 +41,7 @@ class ExecuteCommandInput(BaseModel):
     )
     env: dict[str, str] | None = Field(
         default=None,
-        description="Environment variables for the command",
+        description="Environment variables for the command. Merged with stored environment variables from setenv (provided values take precedence).",
     )
 
     @field_validator("command")
@@ -69,8 +69,56 @@ class ExecuteCommandInput(BaseModel):
         return v
 
 
+class SetWorkingDirectoryInput(BaseModel):
+    """Input schema for set_working_directory tool."""
+
+    dir: str = Field(
+        description="Directory path to set as the persistent working directory"
+    )
+
+    @field_validator("dir")
+    @classmethod
+    def validate_directory(cls, v: str) -> str:
+        """Validate directory path is not empty."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Directory path cannot be empty")
+        return v
+
+
+class SetEnvInput(BaseModel):
+    """Input schema for setenv tool."""
+
+    key: str | None = Field(
+        default=None,
+        description="Environment variable name (use when setting a single variable)",
+    )
+    value: str | None = Field(
+        default=None,
+        description="Environment variable value (use when setting a single variable)",
+    )
+    env: dict[str, str] | None = Field(
+        default=None,
+        description="Dictionary of environment variables to set (use when setting multiple variables)",
+    )
+
+    @field_validator("key", "value")
+    @classmethod
+    def validate_key_value(cls, v: str | None) -> str | None:
+        """Validate key/value pairs."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Environment variable key and value cannot be empty strings")
+        return v
+
+
 # Create the server instance
 server = Server("remote-terminal")
+
+# Module-level state for persistent working directory and environment
+_working_directory: str | None = None
+_env_vars: dict[str, str] = {}
 
 
 @server.list_resources()
@@ -140,13 +188,95 @@ async def handle_list_tools() -> list[types.Tool]:
             description="Execute a shell command on the remote system with safety validation and timeout protection",
             inputSchema=ExecuteCommandInput.model_json_schema(),
         ),
+        types.Tool(
+            name="set_working_directory",
+            description="Set a persistent working directory for subsequent execute_command calls",
+            inputSchema=SetWorkingDirectoryInput.model_json_schema(),
+        ),
+        types.Tool(
+            name="setenv",
+            description="Set persistent environment variables for subsequent execute_command calls. Use key/value for a single variable, or env dict for multiple variables.",
+            inputSchema=SetEnvInput.model_json_schema(),
+        ),
     ]
 
 
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     """Handle tool calls."""
-    if name == "execute_command":
+    global _working_directory, _env_vars
+
+    if name == "set_working_directory":
+        try:
+            input_data = SetWorkingDirectoryInput(**arguments)
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Invalid input: {e}",
+                )
+            ]
+
+        # Validate the directory exists
+        if not os.path.isdir(input_data.dir):
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps({"error": f"Directory not found: {input_data.dir}"}),
+                )
+            ]
+
+        # Update the stored working directory
+        _working_directory = os.path.abspath(input_data.dir)
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {"success": True, "working_directory": _working_directory},
+                    indent=2,
+                ),
+            )
+        ]
+
+    elif name == "setenv":
+        try:
+            input_data = SetEnvInput(**arguments)
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Invalid input: {e}",
+                )
+            ]
+
+        # Validate input: either key/value pair or env dict must be provided
+        if input_data.env is None and (input_data.key is None or input_data.value is None):
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {"error": "Either 'env' dict or both 'key' and 'value' must be provided"}
+                    ),
+                )
+            ]
+
+        # Update environment variables
+        if input_data.env is not None:
+            _env_vars.update(input_data.env)
+        elif input_data.key is not None and input_data.value is not None:
+            _env_vars[input_data.key] = input_data.value
+
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {"success": True, "env_vars": _env_vars},
+                    indent=2,
+                ),
+            )
+        ]
+
+    elif name == "execute_command":
         # Validate and parse input
         try:
             input_data = ExecuteCommandInput(**arguments)
@@ -162,18 +292,26 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
             # Parse command safely using shlex
             args = shlex.split(input_data.command)
 
-            # Prepare environment
+            # Determine working directory: use provided or fall back to stored
+            working_dir = input_data.working_dir or _working_directory
+
+            # Prepare environment: merge stored with provided (provided takes precedence)
             env = None
+            env_to_merge = {}
+            if _env_vars:
+                env_to_merge.update(_env_vars)
             if input_data.env:
+                env_to_merge.update(input_data.env)
+            if env_to_merge:
                 env = os.environ.copy()
-                env.update(input_data.env)
+                env.update(env_to_merge)
 
             # Execute the command
             process = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=input_data.working_dir or None,
+                cwd=working_dir,
                 env=env,
             )
 
