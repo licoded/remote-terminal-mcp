@@ -260,6 +260,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         raise ValueError(f"Unknown tool: {name}")
 
 
+def run_main() -> None:
+    """Sync wrapper for console script entry point."""
+    asyncio.run(main())
+
+
 async def main() -> None:
     """Main entry point for running the server.
 
