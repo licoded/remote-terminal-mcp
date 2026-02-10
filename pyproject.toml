@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-remote-terminal-mcp = "remote_terminal_mcp.server:main"
+remote-terminal-mcp = "remote_terminal_mcp.server:run_main"
 
 [build-system]
 requires = ["hatchling"]
