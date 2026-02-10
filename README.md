@@ -1,11 +1,11 @@
 # Remote Terminal MCP Server
 
-A Model Context Protocol (MCP) server that provides secure command execution capabilities with stdio transport for integration with AI assistants like Claude.
+A Model Context Protocol (MCP) server that provides secure command execution capabilities with both stdio and HTTP/SSE transport options for integration with AI assistants like Claude.
 
 ## Features
 
 - **Full shell command execution** - Run any shell command with proper output capture
-- **Stdio transport** - Direct integration with Claude Desktop and other MCP clients
+- **Dual transport support** - Stdio for local, HTTP/SSE for remote/cross-machine access
 - **Safety validation** - Input validation and timeout protection
 - **Structured output** - Pydantic models for type-safe command results
 - **System resources** - Access system information and environment variables
@@ -37,9 +37,16 @@ pip install -e .
 
 ## Usage
 
+### Transport Options
+
+This MCP server supports two transport modes:
+
+1. **stdio transport** (`remote-terminal-mcp`) - For local integration with Claude Desktop
+2. **HTTP/SSE transport** (`remote-terminal-mcp-http`) - For remote/cross-machine access
+
 ### Running the Server
 
-The server uses stdio transport, which is the standard for MCP client integration:
+#### Stdio Transport (Local)
 
 ```bash
 # Using uv
@@ -49,9 +56,24 @@ uv run remote-terminal-mcp
 python -m remote_terminal_mcp.server
 ```
 
+#### HTTP/SSE Transport (Remote)
+
+```bash
+# Using uv (default: 0.0.0.0:8080)
+uv run remote-terminal-mcp-http
+
+# Custom host/port
+uv run remote-terminal-mcp-http --host 127.0.0.1 --port 9000
+
+# Or via environment variables
+MCP_HOST=0.0.0.0 MCP_PORT=8080 uv run remote-terminal-mcp-http
+```
+
+**Important:** The HTTP/SSE server binds to `0.0.0.0` by default, making it accessible from other machines. Ensure you have proper firewall rules and consider implementing authentication for production use.
+
 ### Connecting Clients
 
-#### Using Claude Desktop
+#### Using Claude Desktop (stdio)
 
 Add to your Claude Desktop MCP configuration (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
@@ -71,7 +93,18 @@ Add to your Claude Desktop MCP configuration (`~/Library/Application Support/Cla
 }
 ```
 
-Replace `/path/to/remote-terminal-mcp` with the actual path to your project directory.
+#### Using HTTP/SSE (Remote/Cross-Machine)
+
+For remote access, start the HTTP server:
+
+```bash
+# On the server machine
+uv run remote-terminal-mcp-http --host 0.0.0.0 --port 8080
+```
+
+Then connect from your MCP client using:
+- SSE endpoint: `http://server-ip:8080/sse`
+- Messages endpoint: `http://server-ip:8080/messages/`
 
 #### Using MCP Inspector
 
@@ -81,8 +114,14 @@ For testing and development:
 # Install the MCP Inspector
 npm install -g @modelcontextprotocol/inspector
 
-# Run the inspector with the server
+# Test stdio transport
 npx @modelcontextprotocol/inspector uv run remote-terminal-mcp
+
+# Test HTTP/SSE transport (requires separate terminal)
+# Terminal 1: Start the server
+uv run remote-terminal-mcp-http
+
+# Terminal 2: Connect inspector to http://localhost:8080/sse
 ```
 
 ## Available Tools
@@ -150,21 +189,44 @@ Get environment variables (sensitive values are redacted).
 
 ## Security Considerations
 
-This server provides full command execution capabilities. Important security notes:
+**WARNING: This server provides full command execution capabilities. Use with extreme caution.**
 
-1. **Command validation** - The server includes basic validation for dangerous patterns, but:
-   - Always sanitize user input
-   - Consider implementing allowlists for permitted commands
-   - Review and audit command logs
+### HTTP/SSE Transport Security
 
-2. **Environment exposure** - Sensitive environment variables are redacted, but:
-   - Review the `system://environment` resource implementation
-   - Consider restricting access to system resources
+The HTTP/SSE transport allows **remote/cross-machine access** to command execution:
 
-3. **Production deployment** - For production use:
-   - Run with minimal required permissions
-   - Set up proper logging and monitoring
-   - Consider implementing additional authentication/authorization
+1. **No authentication by default** - Anyone who can reach the port can execute commands
+2. **Use behind a firewall** - Restrict access to trusted networks only
+3. **Consider adding authentication** - Implement API keys, OAuth, or other auth mechanisms
+4. **Use HTTPS** - For production deployment, use TLS/SSL encryption
+5. **Network isolation** - Run in a isolated network segment when possible
+
+### Command Validation
+
+The server includes basic validation for dangerous patterns, but:
+
+- Always sanitize user input
+- Consider implementing allowlists for permitted commands
+- Review and audit command logs
+- Set appropriate timeout limits
+
+### Environment Exposure
+
+Sensitive environment variables are redacted, but:
+
+- Review the `system://environment` resource implementation
+- Consider restricting access to system resources
+- Be aware of what environment variables are exposed
+
+### Production Deployment
+
+For production use:
+
+- Run with minimal required permissions
+- Set up proper logging and monitoring
+- Implement authentication/authorization
+- Use rate limiting to prevent abuse
+- Keep dependencies updated
 
 ## Development
 

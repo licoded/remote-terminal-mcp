@@ -1,15 +1,19 @@
 [project]
 name = "remote-terminal-mcp"
 version = "0.1.0"
-description = "MCP server for remote command execution with HTTP/WebSocket transport"
+description = "MCP server for remote command execution with HTTP/SSE transport"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.26.0",
+    "sse-starlette>=2.1.0",
+    "starlette>=0.27.0",
+    "uvicorn[standard]>=0.23.0",
 ]
 
 [project.scripts]
 remote-terminal-mcp = "remote_terminal_mcp.server:run_main"
+remote-terminal-mcp-http = "remote_terminal_mcp.http_server:run_main"
 
 [build-system]
 requires = ["hatchling"]
