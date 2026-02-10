@@ -10,6 +10,8 @@ from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import Route, Mount
 
 from .server import (
@@ -24,9 +26,11 @@ from .server import (
 sse_transport = SseServerTransport("/messages/")
 
 
-async def handle_sse(scope: dict[str, Any], receive: Any, send: Any) -> None:
+async def handle_sse(request: Request) -> Response:
     """Handle incoming SSE connections."""
-    async with sse_transport.connect_sse(scope, receive, send) as streams:
+    async with sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
         await server.run(
             streams[0],
             streams[1],
@@ -39,6 +43,8 @@ async def handle_sse(scope: dict[str, Any], receive: Any, send: Any) -> None:
                 ),
             ),
         )
+    # Return empty response to avoid NoneType error
+    return Response()
 
 
 # Create Starlette routes
