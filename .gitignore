@@ -1,5 +1,6 @@
 # Beads task tracking (ephemeral)
 .beadas/
+.worktrees/
 
 # MCP config (user-specific paths)
 .mcp.json
